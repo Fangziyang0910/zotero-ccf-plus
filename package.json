@@ -1,23 +1,23 @@
 {
-  "name": "zotero-ccf-info",
+  "name": "zotero-ccf-plus",
   "version": "0.3.2",
-  "description": "Zotero Plugin for easily obtaining the ccf rating of a paper, the corresponding conference/journal and the number of citations",
+  "description": "Zotero 7 Plugin for easily obtaining the CCF rating, corresponding conference/journal, and citation count of a paper using a cascading Semantic Scholar + DBLP engine.",
   "config": {
-    "addonName": "Zotero CCF Info",
-    "addonID": "ccfinfo@timetrapzz.site",
-    "addonRef": "ccfinfo",
-    "addonInstance": "CCFInfo",
-    "prefsPrefix": "extensions.zotero.ccfinfo"
+    "addonName": "Zotero CCF Plus",
+    "addonID": "ccfplus@timetrapzz.site",
+    "addonRef": "ccfplus",
+    "addonInstance": "CCFPlus",
+    "prefsPrefix": "extensions.zotero.ccfplus"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TimeTrapzz/zotero-ccf-info.git"
+    "url": "git+https://github.com/Fangziyang0910/zotero-ccf-plus.git"
   },
-  "author": "TimeTrapzz",
+  "author": "Fangziyang0910",
   "bugs": {
-    "url": "https://github.com/TimeTrapzz/zotero-ccf-info/issues"
+    "url": "https://github.com/Fangziyang0910/zotero-ccf-plus/issues"
   },
-  "homepage": "https://github.com/TimeTrapzz/zotero-ccf-info#readme",
+  "homepage": "https://github.com/Fangziyang0910/zotero-ccf-plus#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",

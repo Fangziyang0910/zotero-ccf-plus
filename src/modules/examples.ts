@@ -12,6 +12,137 @@ interface CCFInfoData {
 }
 
 export class ExampleFactory {
+  private static escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  private static formatCCFForColumn(ccfInfo: string): string {
+    if (!ccfInfo) {
+      return "";
+    }
+
+    if (ccfInfo === "arXiv") {
+      return "Preprint | arXiv";
+    }
+
+    const match = ccfInfo.match(/^CCF-([ABC])\s+(.+)$/);
+    if (match) {
+      return `CCF ${match[1]} | ${match[2]}`;
+    }
+
+    const noneMatch = ccfInfo.match(/^CCF-None\s+(.+)$/);
+    if (noneMatch) {
+      return `CCF None | ${noneMatch[1]}`;
+    }
+
+    if (ccfInfo === "Not Found") {
+      return "Unknown | Not Found";
+    }
+
+    return ccfInfo;
+  }
+
+  private static formatCitationForColumn(citationNumber: string): string {
+    if (!citationNumber) {
+      return "";
+    }
+
+    if (/^\d+$/.test(citationNumber)) {
+      return `Cited ${citationNumber}`;
+    }
+
+    return citationNumber;
+  }
+
+  private static getCCFBadgeColors(data: string) {
+    if (data.startsWith("CCF A |")) {
+      return { background: "#dff3e8", color: "#146c43", border: "#b7dfc8" };
+    }
+    if (data.startsWith("CCF B |")) {
+      return { background: "#e8eefc", color: "#2f56a6", border: "#c8d5f6" };
+    }
+    if (data.startsWith("CCF C |")) {
+      return { background: "#fff2cc", color: "#8a5a00", border: "#ead083" };
+    }
+    if (data.startsWith("Preprint |")) {
+      return { background: "#edf0f4", color: "#52616b", border: "#d4dae2" };
+    }
+    if (data.startsWith("Unknown |")) {
+      return { background: "#f4e8e8", color: "#9b2c2c", border: "#e8c9c9" };
+    }
+    return { background: "#f1e5f6", color: "#7a2c8f", border: "#e0c8e8" };
+  }
+
+  private static renderCCFCell(
+    data: string,
+    doc: Document,
+    columnClassName: string,
+  ): HTMLElement {
+    const cell = doc.createElement("span");
+    cell.className = `cell ${columnClassName}`;
+    cell.title = data || "";
+    cell.style.overflow = "hidden";
+    cell.style.textOverflow = "ellipsis";
+    cell.style.whiteSpace = "nowrap";
+    cell.style.minWidth = "0";
+
+    if (!data) {
+      return cell;
+    }
+
+    const colors = ExampleFactory.getCCFBadgeColors(data);
+    const badge = doc.createElement("span");
+    badge.textContent = data;
+    badge.className = "ccf-info-badge";
+    badge.style.display = "inline-block";
+    badge.style.maxWidth = "100%";
+    badge.style.minWidth = "0";
+    badge.style.boxSizing = "border-box";
+    badge.style.padding = "2px 8px";
+    badge.style.border = `1px solid ${colors.border}`;
+    badge.style.borderRadius = "6px";
+    badge.style.backgroundColor = colors.background;
+    badge.style.color = colors.color;
+    badge.style.fontWeight = "650";
+    badge.style.lineHeight = "1.3";
+    badge.style.whiteSpace = "nowrap";
+    badge.style.overflow = "hidden";
+    badge.style.textOverflow = "ellipsis";
+    badge.style.verticalAlign = "middle";
+    cell.appendChild(badge);
+    return cell;
+  }
+
+  private static buildCCFNoteContent(data: CCFInfoData): string {
+    const ccfText = data.ccfInfo || "Not Found";
+    const citationText = data.citationNumber || "Not Found";
+    const escapedCcfText = ExampleFactory.escapeHtml(ccfText);
+    const escapedCitationText = ExampleFactory.escapeHtml(citationText);
+    const jsonString = JSON.stringify(data, null, 2);
+    const escapedJson = ExampleFactory.escapeHtml(jsonString);
+
+    return `
+<div><b>${CCF_INFO_NOTE_TITLE}</b></div>
+<div><br /></div>
+<table>
+  <tr>
+    <th align="left">CCF</th>
+    <td>${escapedCcfText}</td>
+  </tr>
+  <tr>
+    <th align="left">Citations</th>
+    <td>${escapedCitationText}</td>
+  </tr>
+</table>
+<div><br /></div>
+<div><b>Raw Data</b></div>
+<div><pre data-ccf-json="1">${escapedJson}</pre></div>`.trim();
+  }
+
   // 从note中获取CCF信息
   private static getCCFInfoFromNote(item: Zotero.Item): CCFInfoData {
     try {
@@ -31,8 +162,25 @@ export class ExampleFactory {
           const noteContent = note.getNote();
           ztoolkit.log("Found CCF note, content:", noteContent);
 
-          // 移除HTML标签，提取JSON内容
-          const textContent = noteContent.replace(/<[^>]*>/g, '').trim();
+          // 优先读取带标记的 JSON 数据
+          const preJsonMatch = noteContent.match(
+            /<pre[^>]*data-ccf-json="1"[^>]*>([\s\S]*?)<\/pre>/i,
+          );
+          if (preJsonMatch) {
+            const jsonText = preJsonMatch[1]
+              .replace(/&quot;/g, '"')
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&amp;/g, "&");
+            const parsed = JSON.parse(jsonText) as CCFInfoData;
+            return {
+              ccfInfo: parsed.ccfInfo || "",
+              citationNumber: parsed.citationNumber || "",
+            };
+          }
+
+          // 兼容旧 note：移除HTML标签，提取JSON内容
+          const textContent = noteContent.replace(/<[^>]*>/g, "").trim();
           ztoolkit.log("Text content:", textContent);
 
           // 尝试找到JSON部分
@@ -54,9 +202,12 @@ export class ExampleFactory {
   }
 
   // 保存CCF信息到note
-  private static async saveCCFInfoToNote(item: Zotero.Item, ccfInfo?: string, citationNumber?: string) {
+  private static async saveCCFInfoToNote(
+    item: Zotero.Item,
+    ccfInfo?: string,
+    citationNumber?: string,
+  ) {
     try {
-
       // getNotes()返回的是note ID数组
       const noteIDs = item.getNotes();
       let ccfNote: Zotero.Item | null = null;
@@ -87,8 +238,14 @@ export class ExampleFactory {
       const existingData = ExampleFactory.getCCFInfoFromNote(item);
 
       // 只更新提供的字段，保留现有值
-      const finalCcfInfo = ccfInfo !== undefined && ccfInfo !== "" ? ccfInfo : existingData.ccfInfo;
-      const finalCitationNumber = citationNumber !== undefined && citationNumber !== "" ? citationNumber : existingData.citationNumber;
+      const finalCcfInfo =
+        ccfInfo !== undefined && ccfInfo !== ""
+          ? ccfInfo
+          : existingData.ccfInfo;
+      const finalCitationNumber =
+        citationNumber !== undefined && citationNumber !== ""
+          ? citationNumber
+          : existingData.citationNumber;
 
       // 构建JSON数据
       const jsonData: CCFInfoData = {
@@ -96,16 +253,15 @@ export class ExampleFactory {
         citationNumber: finalCitationNumber,
       };
 
-      // 构建note内容（使用HTML格式包装JSON，便于在Zotero中查看）
-      const jsonString = JSON.stringify(jsonData, null, 2);
-      const noteContent = `<div><b>${CCF_INFO_NOTE_TITLE}</b></div><div><br /></div><div><pre>${jsonString}</pre></div>`;
+      // 构建可读 note + 可解析 JSON 数据
+      const noteContent = ExampleFactory.buildCCFNoteContent(jsonData);
 
       ztoolkit.log("Saving CCF note with data:", jsonData);
       ccfNote.setNote(noteContent);
       await ccfNote.saveTx();
 
       // 等待一小段时间确保保存完成
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // 刷新列显示
       ExampleFactory.refreshItemTreeRow(item);
@@ -118,13 +274,15 @@ export class ExampleFactory {
   private static refreshItemTreeRow(item: Zotero.Item) {
     try {
       // 方法1: 使用 Zotero.Notifier 触发刷新
-      Zotero.Notifier.trigger('refresh', 'item', [item.id]);
+      Zotero.Notifier.trigger("refresh", "item", [item.id]);
 
       // 方法2: 尝试直接刷新itemsView
       const ZoteroPane = Zotero.getActiveZoteroPane();
       if (ZoteroPane && ZoteroPane.itemsView) {
         try {
-          const rowIndex = ZoteroPane.itemsView.getRowIndexByID(item.id.toString());
+          const rowIndex = ZoteroPane.itemsView.getRowIndexByID(
+            item.id.toString(),
+          );
           if (rowIndex !== false && rowIndex !== undefined) {
             ZoteroPane.itemsView.tree.invalidateRow(rowIndex);
           }
@@ -148,18 +306,32 @@ export class ExampleFactory {
         dataProvider: (item: Zotero.Item, dataKey: string) => {
           try {
             // 确保是正常条目，不是note或附件
-            if (!item || !item.itemTypeID || item.isNote() || item.isAttachment()) {
+            if (
+              !item ||
+              !item.itemTypeID ||
+              item.isNote() ||
+              item.isAttachment()
+            ) {
               return "";
             }
 
             const data = ExampleFactory.getCCFInfoFromNote(item);
-            const result = data.ccfInfo || "";
+            const result = ExampleFactory.formatCCFForColumn(
+              data.ccfInfo || "",
+            );
             return result;
           } catch (error) {
             ztoolkit.log("Error in ccfInfo dataProvider:", error);
             return "";
           }
         },
+        renderCell: (
+          index: number,
+          data: string,
+          column: any,
+          isFirstColumn: boolean,
+          doc: Document,
+        ) => ExampleFactory.renderCCFCell(data, doc, column.className),
         zoteroPersist: ["width", "hidden", "sortDirection"],
       },
       {
@@ -169,12 +341,19 @@ export class ExampleFactory {
         dataProvider: (item: Zotero.Item, dataKey: string) => {
           try {
             // 确保是正常条目，不是note或附件
-            if (!item || !item.itemTypeID || item.isNote() || item.isAttachment()) {
+            if (
+              !item ||
+              !item.itemTypeID ||
+              item.isNote() ||
+              item.isAttachment()
+            ) {
               return "";
             }
 
             const data = ExampleFactory.getCCFInfoFromNote(item);
-            const result = data.citationNumber || "";
+            const result = ExampleFactory.formatCitationForColumn(
+              data.citationNumber || "",
+            );
             return result;
           } catch (error) {
             ztoolkit.log("Error in citationNumber dataProvider:", error);
@@ -197,12 +376,15 @@ export class ExampleFactory {
   }
 
   private static async handleSingleItem(entry: Zotero.Item) {
-    const progressWindow = new ztoolkit.ProgressWindow(getString("paper-info-update"), {
-      closeOtherProgressWindows: true
-    });
+    const progressWindow = new ztoolkit.ProgressWindow(
+      getString("paper-info-update"),
+      {
+        closeOtherProgressWindows: true,
+      },
+    );
     progressWindow.createLine({
       text: getString("requesting-citation-single"),
-      type: "default"
+      type: "default",
     });
     progressWindow.show();
     progressWindow.startCloseTimer(2000);
@@ -219,44 +401,53 @@ export class ExampleFactory {
   }
 
   private static async handleMultipleItems(items: Zotero.Item[]) {
-    const progressWindow = new ztoolkit.ProgressWindow(getString("paper-info-update"), {
-      closeOtherProgressWindows: true
-    });
+    const progressWindow = new ztoolkit.ProgressWindow(
+      getString("paper-info-update"),
+      {
+        closeOtherProgressWindows: true,
+      },
+    );
     progressWindow.createLine({
-      text: getString("requesting-citations-multiple", { args: { count: items.length } }),
-      type: "default"
+      text: getString("requesting-citations-multiple", {
+        args: { count: items.length },
+      }),
+      type: "default",
     });
     progressWindow.show();
     progressWindow.startCloseTimer(2000);
 
-    const titles = items.map(item => item.getField("title"));
-    PaperInfo.batchGetPaperCCFRank(
-      items,
-      titles,
-      async (items, data) => {
-        if (data.length === items.length) {
-          for (let index = 0; index < items.length; index++) {
-            const entry = items[index];
-            await ExampleFactory.saveCCFInfoToNote(entry, data[index].ccfInfo);
-            ExampleFactory.updateCitationNumber(entry, index, items.length);
-          }
-        } else {
-          for (let index = 0; index < items.length; index++) {
-            const entry = items[index];
-            await ExampleFactory.saveCCFInfoToNote(entry, data.ccfInfo);
-            ExampleFactory.updateCitationNumber(entry, items.length, index);
-          }
+    const titles = items.map((item) => item.getField("title"));
+    PaperInfo.batchGetPaperCCFRank(items, titles, async (items, data) => {
+      if (data.length === items.length) {
+        for (let index = 0; index < items.length; index++) {
+          const entry = items[index];
+          await ExampleFactory.saveCCFInfoToNote(entry, data[index].ccfInfo);
+          ExampleFactory.updateCitationNumber(entry, index, items.length);
         }
-      },
-    );
+      } else {
+        for (let index = 0; index < items.length; index++) {
+          const entry = items[index];
+          await ExampleFactory.saveCCFInfoToNote(entry, data.ccfInfo);
+          ExampleFactory.updateCitationNumber(entry, items.length, index);
+        }
+      }
+    });
   }
 
-  private static async updateCitationNumber(entry: Zotero.Item, index?: number, total?: number) {
+  private static async updateCitationNumber(
+    entry: Zotero.Item,
+    index?: number,
+    total?: number,
+  ) {
     PaperInfo.getPaperCitationNumber(
       entry,
       entry.getField("title"),
       async (item, data) => {
-        await ExampleFactory.saveCCFInfoToNote(item, undefined, data.citationNumber);
+        await ExampleFactory.saveCCFInfoToNote(
+          item,
+          undefined,
+          data.citationNumber,
+        );
       },
     );
   }
@@ -305,7 +496,7 @@ export class ExampleFactory {
 
   static async exampleNotifierCallback(regularItems: any) {
     // 等待 10s 以防止 Zotero 未完成条目添加
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    await new Promise((resolve) => setTimeout(resolve, 10000));
     await ExampleFactory.handleGetCCFInfo(regularItems);
   }
 

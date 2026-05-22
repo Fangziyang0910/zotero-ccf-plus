@@ -1,7 +1,8 @@
+import { CCF_ENTRIES_2026 } from "./ccfCatalog2026";
+
 //test
 // const { XMLHttpRequest } = require('xmlhttprequest');
 //test
-
 
 interface PaperInfo {
   strip(s: string): string;
@@ -3699,8 +3700,15 @@ const ccfRankList: { [key: string]: RankInfo } = {
     url: "/conf/icml",
     dblp: "/conf/icml/icml",
   },
-  "/conf/ijcai": {
+  "/conf/iclr": {
     rank: "A",
+    abbr: "ICLR",
+    full: "International Conference on Learning Representations",
+    url: "/conf/iclr",
+    dblp: "/conf/iclr/iclr",
+  },
+  "/conf/ijcai": {
+    rank: "B",
     abbr: "IJCAI",
     full: "International Joint Conference on Artificial Intelligence",
     url: "/conf/ijcai",
@@ -4527,6 +4535,503 @@ const ccfRankList: { [key: string]: RankInfo } = {
   },
 };
 
+const zoteroTextVenueFields = [
+  "conferenceName",
+  "proceedingsTitle",
+  "publicationTitle",
+  "journalAbbreviation",
+  "seriesTitle",
+];
+
+const manualVenueAliases: { [alias: string]: string } = {
+  nips: "/conf/nips",
+  neurips: "/conf/nips",
+  "neurips 2025": "/conf/nips",
+  "neurips 2026": "/conf/nips",
+  "nips.cc": "/conf/nips",
+  "neurips.cc": "/conf/nips",
+  "advances in neural information processing systems": "/conf/nips",
+  "neural information processing systems": "/conf/nips",
+};
+
+const ARXIV_INFO = "arXiv";
+
+const ccfRankList2026: { [key: string]: RankInfo } = {};
+for (const entry of CCF_ENTRIES_2026) {
+  if (!entry.key) {
+    continue;
+  }
+  ccfRankList2026[entry.key] = {
+    rank: entry.rank,
+    abbr: entry.abbr,
+    full: entry.full,
+    url: entry.key,
+    dblp: entry.key,
+  };
+}
+
+interface VenueAliasIndex {
+  exact: { [alias: string]: RankInfo };
+  contains: { [alias: string]: RankInfo };
+}
+
+let venueAliasIndex: VenueAliasIndex | undefined;
+
+function normalizeVenueText(value: string): string {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/&amp;/g, "&")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function getRankInfoByKey(key: string): RankInfo | undefined {
+  const normalizedKey = key.startsWith("/") ? key : `/${key}`;
+  return ccfRankList2026[normalizedKey] || ccfRankList[normalizedKey];
+}
+
+function getVenueAliasIndex(): VenueAliasIndex {
+  if (venueAliasIndex) {
+    return venueAliasIndex;
+  }
+
+  venueAliasIndex = {
+    exact: {},
+    contains: {},
+  };
+  for (const entry of CCF_ENTRIES_2026) {
+    const rankInfo: RankInfo = {
+      rank: entry.rank,
+      abbr: entry.abbr,
+      full: entry.full,
+      url: entry.key || "",
+      dblp: entry.key || "",
+    };
+    const exactAliases = [entry.key, entry.abbr, entry.full].filter(
+      Boolean,
+    ) as string[];
+
+    for (const alias of exactAliases) {
+      const normalizedAlias = normalizeVenueText(alias);
+      if (normalizedAlias && !venueAliasIndex.exact[normalizedAlias]) {
+        venueAliasIndex.exact[normalizedAlias] = rankInfo;
+      }
+    }
+
+    const normalizedFull = normalizeVenueText(entry.full);
+    if (normalizedFull.split(" ").length >= 3) {
+      venueAliasIndex.contains[normalizedFull] = rankInfo;
+    }
+  }
+
+  for (const [key, rankInfo] of Object.entries(ccfRankList)) {
+    const exactAliases = [
+      key,
+      rankInfo.url,
+      rankInfo.dblp,
+      rankInfo.abbr,
+      rankInfo.full,
+    ];
+
+    for (const alias of exactAliases) {
+      const normalizedAlias = normalizeVenueText(alias);
+      if (normalizedAlias && !venueAliasIndex.exact[normalizedAlias]) {
+        venueAliasIndex.exact[normalizedAlias] = rankInfo;
+      }
+    }
+
+    const normalizedFull = normalizeVenueText(rankInfo.full);
+    if (
+      normalizedFull.split(" ").length >= 3 &&
+      !venueAliasIndex.contains[normalizedFull]
+    ) {
+      venueAliasIndex.contains[normalizedFull] = rankInfo;
+    }
+  }
+
+  for (const [alias, key] of Object.entries(manualVenueAliases)) {
+    const rankInfo = getRankInfoByKey(key);
+    const normalizedAlias = normalizeVenueText(alias);
+    if (
+      rankInfo &&
+      normalizedAlias &&
+      !venueAliasIndex.exact[normalizedAlias]
+    ) {
+      venueAliasIndex.exact[normalizedAlias] = rankInfo;
+      if (normalizedAlias.length >= 6) {
+        if (!venueAliasIndex.contains[normalizedAlias]) {
+          venueAliasIndex.contains[normalizedAlias] = rankInfo;
+        }
+      }
+    }
+  }
+
+  return venueAliasIndex;
+}
+
+function getRankInfoByVenueText(value: string): RankInfo | undefined {
+  const normalizedValue = normalizeVenueText(value);
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  const aliasIndex = getVenueAliasIndex();
+  if (aliasIndex.exact[normalizedValue]) {
+    return aliasIndex.exact[normalizedValue];
+  }
+
+  let bestMatch: { alias: string; rankInfo: RankInfo } | undefined;
+  for (const [alias, rankInfo] of Object.entries(aliasIndex.contains)) {
+    if (
+      normalizedValue.includes(` ${alias} `) ||
+      normalizedValue.startsWith(`${alias} `) ||
+      normalizedValue.endsWith(` ${alias}`)
+    ) {
+      if (!bestMatch || alias.length > bestMatch.alias.length) {
+        bestMatch = { alias, rankInfo };
+      }
+    }
+  }
+
+  return bestMatch?.rankInfo;
+}
+
+function getRankInfoByUrl(value: string): RankInfo | undefined {
+  const lowerValue = value.toLowerCase();
+  if (!lowerValue) {
+    return undefined;
+  }
+
+  const dblpRankInfo = getRankInfoByDblpUrl(lowerValue);
+  if (dblpRankInfo) {
+    return dblpRankInfo;
+  }
+
+  if (lowerValue.includes("nips.cc") || lowerValue.includes("neurips.cc")) {
+    return getRankInfoByKey("/conf/nips");
+  }
+
+  return undefined;
+}
+
+function getRankInfoByDblpUrl(url: string): RankInfo | undefined {
+  const cleanUrl = url.replace(/^https?:\/\/dblp\.org\/rec\//, "");
+  if (!cleanUrl.includes("/")) {
+    return undefined;
+  }
+  const venueKey = `/${cleanUrl.substring(0, cleanUrl.lastIndexOf("/"))}`;
+  return getRankInfoByKey(venueKey);
+}
+
+function formatCCFInfo(rankInfo: RankInfo): string {
+  return `CCF-${rankInfo.rank} ${rankInfo.abbr}`;
+}
+
+function getItemField(item: any, field: string): string {
+  try {
+    const value = item?.getField?.(field);
+    return typeof value === "string" ? value : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function isArxivItem(item: any): boolean {
+  const fields = [
+    "archiveID",
+    "repository",
+    "libraryCatalog",
+    "DOI",
+    "url",
+    "extra",
+  ];
+
+  return fields.some((field) =>
+    getItemField(item, field).toLowerCase().includes("arxiv"),
+  );
+}
+
+function getExplicitPublicationVenue(item: any): string {
+  return (
+    getItemField(item, "journalAbbreviation") ||
+    getItemField(item, "publicationTitle")
+  ).trim();
+}
+
+function getCCFInfoFromExtra(item: any): string | undefined {
+  const extra = getItemField(item, "extra");
+  const venueLinePattern =
+    /^\s*(venue|conference|journal|booktitle|proceedings|publication)\s*[:=]\s*(.+)$/i;
+
+  for (const line of extra.split(/\r?\n/)) {
+    const match = line.match(venueLinePattern);
+    if (!match) {
+      continue;
+    }
+
+    const rankInfo = getRankInfoByVenueText(match[2]);
+    if (rankInfo) {
+      return formatCCFInfo(rankInfo);
+    }
+  }
+
+  return undefined;
+}
+
+function getCCFInfoFromZoteroItem(item: any): string | undefined {
+  for (const field of zoteroTextVenueFields) {
+    const value = getItemField(item, field);
+    const rankInfo = getRankInfoByVenueText(value);
+    if (rankInfo) {
+      return formatCCFInfo(rankInfo);
+    }
+  }
+
+  const urlRankInfo = getRankInfoByUrl(getItemField(item, "url"));
+  if (urlRankInfo) {
+    return formatCCFInfo(urlRankInfo);
+  }
+
+  const ccfInfoFromExtra = getCCFInfoFromExtra(item);
+  if (ccfInfoFromExtra) {
+    return ccfInfoFromExtra;
+  }
+
+  if (isArxivItem(item)) {
+    return ARXIV_INFO;
+  }
+
+  const publicationVenue = getExplicitPublicationVenue(item);
+  if (publicationVenue) {
+    return `CCF-None ${publicationVenue}`;
+  }
+
+  return undefined;
+}
+
+// ==========================================
+// Semantic Scholar + DBLP 级联检索引擎辅助方法
+// ==========================================
+
+async function getPaperCCFRankFromSemanticScholar(
+  title: string,
+): Promise<RankInfo | "Arxiv" | undefined> {
+  try {
+    const cleanTitle = title.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    if (!cleanTitle) return undefined;
+
+    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(title)}&limit=3&fields=title,venue,journal,externalIds`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      ztoolkit.log(
+        "Semantic Scholar API returned non-ok status: " + response.status,
+      );
+      return undefined;
+    }
+
+    const result = (await response.json()) as any;
+    if (!result || !result.data || result.data.length === 0) {
+      return undefined;
+    }
+
+    for (const paper of result.data) {
+      if (!paper.title) continue;
+      const paperTitleClean = paper.title
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toLowerCase();
+
+      // 精确比对清洗后的标题
+      if (paperTitleClean === cleanTitle) {
+        // 1. 优先尝试 venue 简称匹配
+        if (paper.venue) {
+          const rankInfo = getRankInfoByVenueText(paper.venue);
+          if (rankInfo) return rankInfo;
+        }
+
+        // 2. 尝试 journal.name 全称匹配
+        if (paper.journal && paper.journal.name) {
+          const rankInfo = getRankInfoByVenueText(paper.journal.name);
+          if (rankInfo) return rankInfo;
+        }
+
+        // 3. 检查是否为 arXiv 预印本
+        if (paper.externalIds && paper.externalIds.ArXiv) {
+          return "Arxiv";
+        }
+      }
+    }
+  } catch (error) {
+    ztoolkit.log("Semantic Scholar query error: " + error);
+  }
+  return undefined;
+}
+
+function getPaperCCFRankFromDBLP(
+  item: any,
+  title: string,
+  update_func: (item: any, data: any) => void,
+): void {
+  const ccfInfoFromItem = getCCFInfoFromZoteroItem(item);
+  if (ccfInfoFromItem) {
+    update_func(item, { ccfInfo: ccfInfoFromItem });
+    return;
+  }
+
+  title = PaperInfo.cleanString(title);
+  if (title === "") {
+    update_func(item, { ccfInfo: "Not Found" });
+    return;
+  }
+
+  const xhr = new XMLHttpRequest();
+  const api_format = `https://dblp.timetrap.workers.dev/?query=${encodeURIComponent(title)}`;
+  xhr.open("GET", api_format, true);
+  xhr.onreadystatechange = function (this: XMLHttpRequest) {
+    if (this.readyState === 4) {
+      if (this.status !== 200) {
+        update_func(item, { ccfInfo: `Net Error: ${this.status}` });
+        return;
+      }
+      const resp = JSON.parse(this.responseText);
+      let rankinfo = undefined;
+      let ccfnoneinfo = undefined;
+
+      for (let i = 0; i < resp["urls"].length; i++) {
+        if (resp["urls"][i]["title"] === title) {
+          const url = resp["urls"][i]["url"];
+          const temp_dblp_url = "/" + url.substring(0, url.lastIndexOf("/"));
+          rankinfo = getRankInfoByDblpUrl(url);
+          if (rankinfo !== undefined) {
+            break;
+          } else {
+            const temp = temp_dblp_url
+              .substring(temp_dblp_url.indexOf("/", 1) + 1)
+              .toUpperCase();
+            if (temp === "CORR") {
+              ccfnoneinfo = ccfnoneinfo || ARXIV_INFO;
+            } else if (
+              ccfnoneinfo === undefined ||
+              ccfnoneinfo === ARXIV_INFO
+            ) {
+              ccfnoneinfo = temp;
+            }
+          }
+        }
+      }
+      if (rankinfo === undefined && ccfnoneinfo === undefined) {
+        update_func(item, { ccfInfo: "Not Found" });
+        return;
+      } else if (rankinfo === undefined) {
+        update_func(item, {
+          ccfInfo:
+            ccfnoneinfo === ARXIV_INFO ? ARXIV_INFO : `CCF-None ${ccfnoneinfo}`,
+        });
+        return;
+      }
+      const rank = rankinfo["rank"];
+      const abbr = rankinfo["abbr"];
+      update_func(item, { ccfInfo: `CCF-${rank} ${abbr}` });
+    }
+  };
+  xhr.send();
+}
+
+function batchGetPaperCCFRankFromDBLP(
+  items: any[],
+  titles: string[],
+  update_func: (items: any[], data: any) => void,
+): void {
+  const localResults = items.map((item) => getCCFInfoFromZoteroItem(item));
+  if (localResults.every((ccfInfo) => ccfInfo !== undefined)) {
+    update_func(
+      items,
+      localResults.map((ccfInfo) => ({ ccfInfo })),
+    );
+    return;
+  }
+
+  titles = titles.map((title) => PaperInfo.cleanString(title));
+
+  const xhr = new XMLHttpRequest();
+  const api_format = `https://dblp.timetrap.workers.dev/`;
+  const data = JSON.stringify({
+    queries: titles,
+  });
+  ztoolkit.log(data);
+  xhr.open("POST", api_format, true);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.onreadystatechange = function (this: XMLHttpRequest) {
+    if (this.readyState === 4) {
+      if (this.status !== 200) {
+        update_func(
+          items,
+          localResults.map((ccfInfo) => ({
+            ccfInfo: ccfInfo || `Net Error: ${this.status}`,
+          })),
+        );
+        return;
+      }
+
+      const resp = JSON.parse(this.responseText);
+      const results: any[] = [];
+
+      items.forEach((item, index) => {
+        if (localResults[index]) {
+          results.push({ ccfInfo: localResults[index] });
+          return;
+        }
+
+        const title = titles[index];
+        let rankinfo = undefined;
+        let ccfnoneinfo = undefined;
+
+        const urls = resp[index]?.["urls"] || [];
+        for (let i = 0; i < urls.length; i++) {
+          if (urls[i]["title"] === title) {
+            const url = urls[i]["url"];
+            const temp_dblp_url = "/" + url.substring(0, url.lastIndexOf("/"));
+            rankinfo = getRankInfoByDblpUrl(url);
+            if (rankinfo !== undefined) {
+              break;
+            } else {
+              const temp = temp_dblp_url
+                .substring(temp_dblp_url.indexOf("/", 1) + 1)
+                .toUpperCase();
+              if (temp === "CORR") {
+                ccfnoneinfo = ccfnoneinfo || ARXIV_INFO;
+              } else if (
+                ccfnoneinfo === undefined ||
+                ccfnoneinfo === ARXIV_INFO
+              ) {
+                ccfnoneinfo = temp;
+              }
+            }
+          }
+        }
+
+        if (rankinfo === undefined && ccfnoneinfo === undefined) {
+          results.push({ ccfInfo: "Not Found" });
+        } else if (rankinfo === undefined) {
+          results.push({
+            ccfInfo:
+              ccfnoneinfo === ARXIV_INFO
+                ? ARXIV_INFO
+                : `CCF-None ${ccfnoneinfo}`,
+          });
+        } else {
+          const rank = rankinfo["rank"];
+          const abbr = rankinfo["abbr"];
+          results.push({ ccfInfo: `CCF-${rank} ${abbr}` });
+        }
+      });
+      update_func(items, results);
+    }
+  };
+  xhr.send(data);
+}
+
 export const PaperInfo: PaperInfo = {
   strip(s: string): string {
     let result = s.toLowerCase().replace(/[.,^\s]/g, ""); //全部变成小写并去除所有空格逗号和句号
@@ -4544,7 +5049,7 @@ export const PaperInfo: PaperInfo = {
   },
 
   cleanString(input: string): string {
-    let alphanumeric = input.replace(/[^a-zA-Z0-9]/g, '');
+    const alphanumeric = input.replace(/[^a-zA-Z0-9]/g, "");
     return alphanumeric.toLowerCase();
   },
 
@@ -4622,7 +5127,9 @@ export const PaperInfo: PaperInfo = {
         if (hit_index === -1) {
           update_func(item, { citationNumber: "Not Found" });
         } else {
-          const pcitations = responseData.hitList[hit_index].ncitation ? responseData.hitList[hit_index].ncitation : 0;
+          const pcitations = responseData.hitList[hit_index].ncitation
+            ? responseData.hitList[hit_index].ncitation
+            : 0;
           const addition_info = min_dis > 0 ? `?ED:${min_dis}` : "";
 
           update_func(item, { citationNumber: pcitations });
@@ -4662,57 +5169,34 @@ export const PaperInfo: PaperInfo = {
     title: string,
     update_func: (item: any, data: any) => void,
   ): void {
+    const ccfInfoFromItem = getCCFInfoFromZoteroItem(item);
+    if (ccfInfoFromItem) {
+      update_func(item, { ccfInfo: ccfInfoFromItem });
+      return;
+    }
 
-    title = this.cleanString(title);
-    if (title === "") {
+    const cleanTitle = this.cleanString(title);
+    if (cleanTitle === "") {
       update_func(item, { ccfInfo: "Not Found" });
       return;
     }
 
-    const xhr = new XMLHttpRequest();
-    const api_format = `https://dblp.timetrap.workers.dev/?query=${encodeURIComponent(title)}`;
-    xhr.open("GET", api_format, true);
-    xhr.onreadystatechange = function (this: XMLHttpRequest) {
-      if (this.readyState === 4) {
-        if (this.status !== 200) {
-          update_func(item, { ccfInfo: `Net Error: ${this.status}` });
-          return;
-        }
-        const resp = JSON.parse(this.responseText);
-        let rankinfo = undefined;
-        let ccfnoneinfo = undefined;
-
-        for (let i = 0; i < resp['urls'].length; i++) {
-          if (resp['urls'][i]['title'] === title) {
-            let url = resp['urls'][i]['url'];
-            let temp_dblp_url = '/' + url.substring(0, url.lastIndexOf("/"));
-            rankinfo = ccfRankList[temp_dblp_url];
-            if (rankinfo !== undefined) {
-              break;
-            }
-            else {
-              let temp = temp_dblp_url.substring(temp_dblp_url.indexOf("/", 1) + 1).toUpperCase();
-              if (ccfnoneinfo === undefined || temp !== "CORR") {
-                ccfnoneinfo = temp;
-              }
-            }
+    getPaperCCFRankFromSemanticScholar(title)
+      .then((result) => {
+        if (result) {
+          if (result === "Arxiv") {
+            update_func(item, { ccfInfo: ARXIV_INFO });
+          } else {
+            update_func(item, { ccfInfo: `CCF-${result.rank} ${result.abbr}` });
           }
+        } else {
+          getPaperCCFRankFromDBLP(item, title, update_func);
         }
-        if (rankinfo === undefined && ccfnoneinfo === undefined) {
-          update_func(item, { ccfInfo: "Not Found" });
-          return;
-        }
-        else if (rankinfo === undefined) {
-          update_func(item, { ccfInfo: `CCF-None ${ccfnoneinfo}` });
-          return;
-        }
-        const rank = rankinfo["rank"];
-        const abbr = rankinfo["abbr"];
-        update_func(item, { ccfInfo: `CCF-${rank} ${abbr}` });
-        // console.log(`CCF-${rank} ${abbr}`);
-      }
-    };
-    xhr.send();
+      })
+      .catch((err) => {
+        ztoolkit.log("S2 matching rejected, falling back to DBLP: " + err);
+        getPaperCCFRankFromDBLP(item, title, update_func);
+      });
   },
 
   batchGetPaperCCFRank(
@@ -4720,64 +5204,72 @@ export const PaperInfo: PaperInfo = {
     titles: string[],
     update_func: (items: any[], data: any) => void,
   ): void {
-    titles = titles.map(title => this.cleanString(title));
+    const localResults = items.map((item) => getCCFInfoFromZoteroItem(item));
+    if (localResults.every((ccfInfo) => ccfInfo !== undefined)) {
+      update_func(
+        items,
+        localResults.map((ccfInfo) => ({ ccfInfo })),
+      );
+      return;
+    }
 
-    const xhr = new XMLHttpRequest();
-    const api_format = `https://dblp.timetrap.workers.dev/`;
-    const data = JSON.stringify({
-      queries: titles,
-    });
-    ztoolkit.log(data);
-    xhr.open("POST", api_format, true);
-    xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.onreadystatechange = function (this: XMLHttpRequest) {
-      if (this.readyState === 4) {
-        if (this.status !== 200) {
-          update_func(items, { ccfInfo: `Net Error: ${this.status}` });
-          return;
+    const promises = items.map(async (item, index) => {
+      if (localResults[index]) {
+        return { ccfInfo: localResults[index] };
+      }
+      const title = titles[index];
+      try {
+        const s2Result = await getPaperCCFRankFromSemanticScholar(title);
+        if (s2Result) {
+          if (s2Result === "Arxiv") {
+            return { ccfInfo: ARXIV_INFO };
+          } else {
+            return { ccfInfo: `CCF-${s2Result.rank} ${s2Result.abbr}` };
+          }
         }
+      } catch (e) {
+        ztoolkit.log("S2 batch item query error: " + e);
+      }
+      return undefined;
+    });
 
-        const resp = JSON.parse(this.responseText);
-        const results: any[] = [];
+    Promise.all(promises)
+      .then((s2Results) => {
+        const pendingItems: any[] = [];
+        const pendingTitles: string[] = [];
+        const pendingIndices: number[] = [];
 
-        items.forEach((item, index) => {
-          const title = titles[index];
-          let rankinfo = undefined;
-          let ccfnoneinfo = undefined;
-
-          for (let i = 0; i < resp[index]['urls'].length; i++) {
-            if (resp[index]['urls'][i]['title'] === title) {
-              let url = resp[index]['urls'][i]['url'];
-              let temp_dblp_url = '/' + url.substring(0, url.lastIndexOf("/"));
-              rankinfo = ccfRankList[temp_dblp_url];
-              if (rankinfo !== undefined) {
-                break;
-              }
-              else {
-                let temp = temp_dblp_url.substring(temp_dblp_url.indexOf("/", 1) + 1).toUpperCase();
-                if (ccfnoneinfo === undefined || temp !== "CORR") {
-                  ccfnoneinfo = temp;
-                }
-              }
-            }
-          }
-
-          if (rankinfo === undefined && ccfnoneinfo === undefined) {
-            results.push({ ccfInfo: "Not Found" });
-          }
-          else if (rankinfo === undefined) {
-            results.push({ ccfInfo: `CCF-None ${ccfnoneinfo}` });
-          }
-          else {
-            const rank = rankinfo["rank"];
-            const abbr = rankinfo["abbr"];
-            results.push({ ccfInfo: `CCF-${rank} ${abbr}` });
+        s2Results.forEach((res, index) => {
+          if (!res) {
+            pendingItems.push(items[index]);
+            pendingTitles.push(titles[index]);
+            pendingIndices.push(index);
           }
         });
-        update_func(items, results);
-      }
-    };
-    xhr.send(data);
+
+        if (pendingItems.length === 0) {
+          update_func(items, s2Results);
+        } else {
+          batchGetPaperCCFRankFromDBLP(
+            pendingItems,
+            pendingTitles,
+            (pItems: any[], pResults: any[]) => {
+              const finalResults = [...s2Results];
+              pResults.forEach((pRes: any, pIndex: number) => {
+                const originalIndex = pendingIndices[pIndex];
+                finalResults[originalIndex] = pRes;
+              });
+              update_func(items, finalResults);
+            },
+          );
+        }
+      })
+      .catch((err) => {
+        ztoolkit.log(
+          "S2 batch matching rejected, falling back to DBLP: " + err,
+        );
+        batchGetPaperCCFRankFromDBLP(items, titles, update_func);
+      });
   },
 
   updatePaperInfo(

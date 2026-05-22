@@ -63,7 +63,7 @@ function onShutdown(): void {
   addon.data.dialog?.window?.close();
   // Remove addon object
   addon.data.alive = false;
-  // @ts-ignore
+  // @ts-ignore: Dynamic addonInstance is not explicitly typed on Zotero global
   delete Zotero[config.addonInstance];
 }
 
