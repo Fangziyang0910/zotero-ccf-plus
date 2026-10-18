@@ -1,7 +1,7 @@
 {
   "name": "zotero-ccf-plus",
-  "version": "0.3.2",
-  "description": "Zotero 7 Plugin for easily obtaining the CCF rating, corresponding conference/journal, and citation count of a paper using a cascading Semantic Scholar + DBLP engine.",
+  "version": "0.3.3",
+  "description": "Zotero plugin for obtaining the CCF rating, corresponding conference/journal, and citation count of a paper using a cascading Semantic Scholar + DBLP engine.",
   "config": {
     "addonName": "Zotero CCF Plus",
     "addonID": "ccfplus@timetrapzz.site",

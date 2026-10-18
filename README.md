@@ -47,6 +47,9 @@
 3. 点击右上角的齿轮图标，选择 `Install Add-on From File...` (从文件安装附加组件...)。
 4. 选择下载的 `.xpi` 文件安装，重启 Zotero 即可。
 
+For Zotero 10 installation and manual validation, see the
+[Windows compatibility checklist](./doc/zotero10-testing.md).
+
 ---
 
 ## 🤝 致谢与声明 (Credits & Acknowledgement)
