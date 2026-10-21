@@ -1,7 +1,7 @@
 {
   "name": "zotero-ccf-plus",
-  "version": "0.3.2",
-  "description": "Zotero 7 Plugin for easily obtaining the CCF rating, corresponding conference/journal, and citation count of a paper using a cascading Semantic Scholar + DBLP engine.",
+  "version": "0.3.4",
+  "description": "Zotero Plugin for easily obtaining the CCF rating, corresponding conference/journal, and citation count of a paper using a cascading Semantic Scholar + DBLP engine.",
   "config": {
     "addonName": "Zotero CCF Plus",
     "addonID": "ccfplus@timetrapzz.site",
@@ -22,10 +22,14 @@
   "scripts": {
     "start": "zotero-plugin serve",
     "build": "tsc --noEmit && zotero-plugin build",
-    "lint": "prettier --write . && eslint . --fix",
+    "lint": "eslint .",
     "release": "zotero-plugin release",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "update-deps": "npm update --save"
+    "test": "node --test tests/*.test.mjs",
+    "update-deps": "npm update --save",
+    "lint:fix": "eslint . --fix",
+    "format:check": "prettier --check src addon tests package.json README.md CHANGELOG.md CONTRIBUTING.md .github/workflows",
+    "format": "prettier --write src addon tests package.json README.md CHANGELOG.md CONTRIBUTING.md .github/workflows",
+    "check": "npm test && npm run lint && npm run format:check"
   },
   "dependencies": {
     "zotero-plugin-toolkit": "5.1.0-beta.13"
@@ -38,7 +42,8 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.53.1",
     "zotero-plugin-scaffold": "^0.8.2",
-    "zotero-types": "4.1.0-beta.4"
+    "zotero-types": "4.1.0-beta.4",
+    "esbuild": "0.28.0"
   },
   "prettier": {
     "printWidth": 80,
@@ -54,5 +59,8 @@
         }
       }
     ]
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

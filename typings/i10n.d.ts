@@ -8,4 +8,6 @@ export type FluentMessageId =
   | 'get-ccf-info'
   | 'paper-info-update'
   | 'requesting-citation-single'
-  | 'requesting-citations-multiple';
+  | 'requesting-citations-multiple'
+  | 'update-complete'
+  | 'update-partial';

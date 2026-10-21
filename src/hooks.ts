@@ -1,33 +1,41 @@
 import { ExampleFactory } from "./modules/examples";
 import { config } from "../package.json";
-import { getString, initLocale } from "./utils/locale";
+import { initLocale } from "./utils/locale";
+import { stopRequests } from "./modules/requests";
+import { getPref } from "./utils/prefs";
 import { createZToolkit } from "./utils/ztoolkit";
 
+const windows = new Map<Window, { toolkit: ZToolkit; cleanup: () => void }>();
+let initialization: Promise<void> | undefined;
+
 async function onStartup() {
-  await Promise.all([
-    Zotero.initializationPromise,
-    Zotero.unlockPromise,
-    Zotero.uiReadyPromise,
-  ]);
-
-  initLocale();
-
-  await onMainWindowLoad(window);
+  initialization ||= (async () => {
+    await Promise.all([
+      Zotero.initializationPromise,
+      Zotero.unlockPromise,
+      Zotero.uiReadyPromise,
+    ]);
+    initLocale();
+    await ExampleFactory.registerExtraColumn();
+    ExampleFactory.registerNotifier();
+  })();
+  await initialization;
+  for (const win of Zotero.getMainWindows()) await onMainWindowLoad(win);
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
-  // Create ztoolkit for every window
-  addon.data.ztoolkit = createZToolkit();
-
-  // Register all UI components and listeners
-  ExampleFactory.registerRightClickMenuItem();
-  ExampleFactory.registerExtraColumn();
-  ExampleFactory.registerNotifier();
+  if (initialization) await initialization;
+  if (!initialization || !addon.data.alive || windows.has(win)) return;
+  const toolkit = createZToolkit();
+  const cleanup = ExampleFactory.registerRightClickMenuItem(win, toolkit);
+  windows.set(win, { toolkit, cleanup });
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
-  ztoolkit.unregisterAll();
-  addon.data.dialog?.window?.close();
+  const state = windows.get(win);
+  state?.cleanup?.();
+  state?.toolkit.unregisterAll();
+  windows.delete(win);
 }
 
 async function onNotify(
@@ -38,31 +46,39 @@ async function onNotify(
 ) {
   ztoolkit.log("notify", event, type, ids, extraData);
 
-  if (event == "add" && type == "item") {
+  if (event == "add" && type == "item" && getPref("enable") !== false) {
     // Get items and filter out attachments and other non-regular items
     const items = Zotero.Items.get(ids as number[]);
-    const regularItems = items.filter(
-      (item) =>
-        item.isRegularItem() &&
-        !item.isAttachment() &&
-        // @ts-ignore item has no isFeedItem
-        !item.isFeedItem &&
-        // @ts-ignore libraryID is got from item, so get() will never return false
-        Zotero.Libraries.get(item.libraryID)._libraryType == "user",
-    );
+    const regularItems = items.filter((item) => {
+      if (!item || item.deleted || !item.isRegularItem() || item.isAttachment())
+        return false;
+      const feedItem = (
+        item as unknown as { isFeedItem?: boolean | (() => boolean) }
+      ).isFeedItem;
+      if (typeof feedItem === "function" ? feedItem.call(item) : feedItem)
+        return false;
+      const library = Zotero.Libraries.get(item.libraryID);
+      return library && library.libraryType === "user" && library.editable;
+    });
 
     if (regularItems.length !== 0) {
-      ExampleFactory.exampleNotifierCallback(regularItems);
+      await ExampleFactory.exampleNotifierCallback(regularItems);
       return;
     }
   }
 }
 
 function onShutdown(): void {
+  addon.data.alive = false;
+  stopRequests();
+  ExampleFactory.unregisterApplicationResources();
+  for (const state of windows.values()) {
+    state.cleanup?.();
+    state.toolkit.unregisterAll();
+  }
+  windows.clear();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  // Remove addon object
-  addon.data.alive = false;
   // @ts-ignore: Dynamic addonInstance is not explicitly typed on Zotero global
   delete Zotero[config.addonInstance];
 }

@@ -1,8 +1,5 @@
 import { CCF_ENTRIES_2026 } from "./ccfCatalog2026";
-
-//test
-// const { XMLHttpRequest } = require('xmlhttprequest');
-//test
+import { LookupError, requestJSON } from "./requests";
 
 interface PaperInfo {
   strip(s: string): string;
@@ -12,22 +9,22 @@ interface PaperInfo {
     item: any,
     title: string,
     update_func: (item: any, data: any) => void,
-  ): void;
+  ): Promise<void>;
   getPaperCCFRank(
     item: any,
     title: string,
     update_func: (item: any, data: any) => void,
-  ): void;
+  ): Promise<void>;
   batchGetPaperCCFRank(
     items: any[],
     titles: string[],
     callback: (item: any, data: any) => void,
-  ): void;
+  ): Promise<void>;
   updatePaperInfo(
     item: any,
     title: string,
     callback: (item: any, data: any) => void,
-  ): void;
+  ): Promise<void>;
 }
 
 interface RankInfo {
@@ -4815,221 +4812,141 @@ function getCCFInfoFromZoteroItem(item: any): string | undefined {
 // Semantic Scholar + DBLP 级联检索引擎辅助方法
 // ==========================================
 
-async function getPaperCCFRankFromSemanticScholar(
+interface SemanticPaper {
+  title?: string;
+  venue?: string;
+  journal?: { name?: string };
+  externalIds?: { ArXiv?: string };
+  citationCount?: number;
+}
+
+const semanticCache = new Map<
+  string,
+  { paper: SemanticPaper; expires: number }
+>();
+const semanticPending = new Map<string, Promise<SemanticPaper | undefined>>();
+
+function normalizeTitle(title: string): string {
+  return title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function lookupError(error: unknown): string {
+  return error instanceof LookupError
+    ? `Error: ${error.status}`
+    : "Error: Network or invalid response";
+}
+
+async function findSemanticPaper(
+  item: any,
   title: string,
-): Promise<RankInfo | "Arxiv" | undefined> {
-  try {
-    const cleanTitle = title.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-    if (!cleanTitle) return undefined;
-
-    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(title)}&limit=3&fields=title,venue,journal,externalIds`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      ztoolkit.log(
-        "Semantic Scholar API returned non-ok status: " + response.status,
-      );
-      return undefined;
-    }
-
-    const result = (await response.json()) as any;
-    if (!result || !result.data || result.data.length === 0) {
-      return undefined;
-    }
-
-    for (const paper of result.data) {
-      if (!paper.title) continue;
-      const paperTitleClean = paper.title
-        .replace(/[^a-zA-Z0-9]/g, "")
-        .toLowerCase();
-
-      // 精确比对清洗后的标题
-      if (paperTitleClean === cleanTitle) {
-        // 1. 优先尝试 venue 简称匹配
-        if (paper.venue) {
-          const rankInfo = getRankInfoByVenueText(paper.venue);
-          if (rankInfo) return rankInfo;
-        }
-
-        // 2. 尝试 journal.name 全称匹配
-        if (paper.journal && paper.journal.name) {
-          const rankInfo = getRankInfoByVenueText(paper.journal.name);
-          if (rankInfo) return rankInfo;
-        }
-
-        // 3. 检查是否为 arXiv 预印本
-        if (paper.externalIds && paper.externalIds.ArXiv) {
-          return "Arxiv";
-        }
+): Promise<SemanticPaper | undefined> {
+  const normalized = normalizeTitle(title);
+  if (!normalized) return undefined;
+  const doi = getItemField(item, "DOI")
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
+    .trim();
+  const arxivID = getItemField(item, "archiveID").trim();
+  const identifier = doi
+    ? `DOI:${doi}`
+    : isArxivItem(item) && /^\d{4}\.\d{4,5}(?:v\d+)?$/.test(arxivID)
+      ? `ARXIV:${arxivID.replace(/v\d+$/, "")}`
+      : "";
+  const key = `${identifier}|${normalized}`;
+  const cached = semanticCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.paper;
+  const pending = semanticPending.get(key);
+  if (pending) return pending;
+  const lookup = (async () => {
+    const fields = "title,venue,journal,externalIds,citationCount";
+    let candidates: SemanticPaper[] = [];
+    if (identifier) {
+      try {
+        const paper = await requestJSON(
+          `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(identifier)}?fields=${fields}`,
+        );
+        if (paper && typeof paper.title === "string") candidates = [paper];
+      } catch (error) {
+        if (!(error instanceof LookupError) || error.status !== 404)
+          throw error;
       }
     }
-  } catch (error) {
-    ztoolkit.log("Semantic Scholar query error: " + error);
+    if (!candidates.length) {
+      const result = await requestJSON(
+        `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(title)}&limit=3&fields=${fields}`,
+      );
+      if (!result || !Array.isArray(result.data))
+        throw new LookupError("Invalid response");
+      candidates = result.data;
+    }
+    // Use exact normalized titles: an edit-distance threshold can match unrelated short titles.
+    const paper = candidates.find(
+      (candidate) =>
+        typeof candidate?.title === "string" &&
+        normalizeTitle(candidate.title) === normalized,
+    );
+    if (paper) {
+      if (semanticCache.size >= 256)
+        semanticCache.delete(semanticCache.keys().next().value!);
+      semanticCache.set(key, { paper, expires: Date.now() + 5 * 60 * 1000 });
+    }
+    return paper;
+  })();
+  semanticPending.set(key, lookup);
+  try {
+    return await lookup;
+  } finally {
+    semanticPending.delete(key);
   }
+}
+
+async function getPaperCCFRankFromSemanticScholar(
+  item: any,
+  title: string,
+): Promise<RankInfo | "Arxiv" | undefined> {
+  const paper = await findSemanticPaper(item, title);
+  if (!paper) return undefined;
+  for (const venue of [paper.venue, paper.journal?.name]) {
+    if (typeof venue === "string") {
+      const rank = getRankInfoByVenueText(venue);
+      if (rank) return rank;
+    }
+  }
+  if (!paper.venue && !paper.journal?.name && paper.externalIds?.ArXiv)
+    return "Arxiv";
   return undefined;
 }
 
-function getPaperCCFRankFromDBLP(
-  item: any,
-  title: string,
-  update_func: (item: any, data: any) => void,
-): void {
-  const ccfInfoFromItem = getCCFInfoFromZoteroItem(item);
-  if (ccfInfoFromItem) {
-    update_func(item, { ccfInfo: ccfInfoFromItem });
-    return;
+async function getPaperCCFRankFromDBLP(title: string): Promise<string> {
+  const query = PaperInfo.cleanString(title);
+  if (!query) return "Not Found";
+  const response = await requestJSON(
+    `https://dblp.timetrap.workers.dev/?query=${encodeURIComponent(query)}`,
+  );
+  if (!response || !Array.isArray(response.urls))
+    throw new LookupError("Invalid DBLP response");
+  let unranked: string | undefined;
+  for (const hit of response.urls) {
+    if (
+      typeof hit?.title !== "string" ||
+      typeof hit?.url !== "string" ||
+      normalizeTitle(hit.title) !== query
+    )
+      continue;
+    const rank = getRankInfoByDblpUrl(hit.url);
+    if (rank) return formatCCFInfo(rank);
+    const key = hit.url
+      .replace(/^https?:\/\/[^/]+\/rec\//, "")
+      .replace(/^\//, "");
+    const venue = key.split("/")[1];
+    if (!venue) continue;
+    if (venue.toLowerCase() === "corr") unranked ||= ARXIV_INFO;
+    else if (!unranked || unranked === ARXIV_INFO)
+      unranked = `CCF-None ${venue.toUpperCase()}`;
   }
-
-  title = PaperInfo.cleanString(title);
-  if (title === "") {
-    update_func(item, { ccfInfo: "Not Found" });
-    return;
-  }
-
-  const xhr = new XMLHttpRequest();
-  const api_format = `https://dblp.timetrap.workers.dev/?query=${encodeURIComponent(title)}`;
-  xhr.open("GET", api_format, true);
-  xhr.onreadystatechange = function (this: XMLHttpRequest) {
-    if (this.readyState === 4) {
-      if (this.status !== 200) {
-        update_func(item, { ccfInfo: `Net Error: ${this.status}` });
-        return;
-      }
-      const resp = JSON.parse(this.responseText);
-      let rankinfo = undefined;
-      let ccfnoneinfo = undefined;
-
-      for (let i = 0; i < resp["urls"].length; i++) {
-        if (resp["urls"][i]["title"] === title) {
-          const url = resp["urls"][i]["url"];
-          const temp_dblp_url = "/" + url.substring(0, url.lastIndexOf("/"));
-          rankinfo = getRankInfoByDblpUrl(url);
-          if (rankinfo !== undefined) {
-            break;
-          } else {
-            const temp = temp_dblp_url
-              .substring(temp_dblp_url.indexOf("/", 1) + 1)
-              .toUpperCase();
-            if (temp === "CORR") {
-              ccfnoneinfo = ccfnoneinfo || ARXIV_INFO;
-            } else if (
-              ccfnoneinfo === undefined ||
-              ccfnoneinfo === ARXIV_INFO
-            ) {
-              ccfnoneinfo = temp;
-            }
-          }
-        }
-      }
-      if (rankinfo === undefined && ccfnoneinfo === undefined) {
-        update_func(item, { ccfInfo: "Not Found" });
-        return;
-      } else if (rankinfo === undefined) {
-        update_func(item, {
-          ccfInfo:
-            ccfnoneinfo === ARXIV_INFO ? ARXIV_INFO : `CCF-None ${ccfnoneinfo}`,
-        });
-        return;
-      }
-      const rank = rankinfo["rank"];
-      const abbr = rankinfo["abbr"];
-      update_func(item, { ccfInfo: `CCF-${rank} ${abbr}` });
-    }
-  };
-  xhr.send();
-}
-
-function batchGetPaperCCFRankFromDBLP(
-  items: any[],
-  titles: string[],
-  update_func: (items: any[], data: any) => void,
-): void {
-  const localResults = items.map((item) => getCCFInfoFromZoteroItem(item));
-  if (localResults.every((ccfInfo) => ccfInfo !== undefined)) {
-    update_func(
-      items,
-      localResults.map((ccfInfo) => ({ ccfInfo })),
-    );
-    return;
-  }
-
-  titles = titles.map((title) => PaperInfo.cleanString(title));
-
-  const xhr = new XMLHttpRequest();
-  const api_format = `https://dblp.timetrap.workers.dev/`;
-  const data = JSON.stringify({
-    queries: titles,
-  });
-  ztoolkit.log(data);
-  xhr.open("POST", api_format, true);
-  xhr.setRequestHeader("Content-Type", "application/json");
-  xhr.onreadystatechange = function (this: XMLHttpRequest) {
-    if (this.readyState === 4) {
-      if (this.status !== 200) {
-        update_func(
-          items,
-          localResults.map((ccfInfo) => ({
-            ccfInfo: ccfInfo || `Net Error: ${this.status}`,
-          })),
-        );
-        return;
-      }
-
-      const resp = JSON.parse(this.responseText);
-      const results: any[] = [];
-
-      items.forEach((item, index) => {
-        if (localResults[index]) {
-          results.push({ ccfInfo: localResults[index] });
-          return;
-        }
-
-        const title = titles[index];
-        let rankinfo = undefined;
-        let ccfnoneinfo = undefined;
-
-        const urls = resp[index]?.["urls"] || [];
-        for (let i = 0; i < urls.length; i++) {
-          if (urls[i]["title"] === title) {
-            const url = urls[i]["url"];
-            const temp_dblp_url = "/" + url.substring(0, url.lastIndexOf("/"));
-            rankinfo = getRankInfoByDblpUrl(url);
-            if (rankinfo !== undefined) {
-              break;
-            } else {
-              const temp = temp_dblp_url
-                .substring(temp_dblp_url.indexOf("/", 1) + 1)
-                .toUpperCase();
-              if (temp === "CORR") {
-                ccfnoneinfo = ccfnoneinfo || ARXIV_INFO;
-              } else if (
-                ccfnoneinfo === undefined ||
-                ccfnoneinfo === ARXIV_INFO
-              ) {
-                ccfnoneinfo = temp;
-              }
-            }
-          }
-        }
-
-        if (rankinfo === undefined && ccfnoneinfo === undefined) {
-          results.push({ ccfInfo: "Not Found" });
-        } else if (rankinfo === undefined) {
-          results.push({
-            ccfInfo:
-              ccfnoneinfo === ARXIV_INFO
-                ? ARXIV_INFO
-                : `CCF-None ${ccfnoneinfo}`,
-          });
-        } else {
-          const rank = rankinfo["rank"];
-          const abbr = rankinfo["abbr"];
-          results.push({ ccfInfo: `CCF-${rank} ${abbr}` });
-        }
-      });
-      update_func(items, results);
-    }
-  };
-  xhr.send(data);
+  return unranked || "Not Found";
 }
 
 export const PaperInfo: PaperInfo = {
@@ -5049,8 +4966,7 @@ export const PaperInfo: PaperInfo = {
   },
 
   cleanString(input: string): string {
-    const alphanumeric = input.replace(/[^a-zA-Z0-9]/g, "");
-    return alphanumeric.toLowerCase();
+    return normalizeTitle(input);
   },
 
   minDistance(s1: string, s2: string): number {
@@ -5080,180 +4996,62 @@ export const PaperInfo: PaperInfo = {
     return matrix[len1][len2];
   },
 
-  getPaperCitationNumber(
-    item: any,
-    title: string,
-    update_func: (item: any, data: any) => void,
-  ): void {
-    const cleanTitle = title.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-    if (!cleanTitle) {
-      update_func(item, { citationNumber: "Not Found" });
-      return;
-    }
-
-    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(title)}&limit=3&fields=title,citationCount`;
-    
-    fetch(url)
-      .then((response) => {
-        if (!response.ok) {
-          update_func(item, { citationNumber: `Error: ${response.status}` });
-          return;
-        }
-        return response.json();
-      })
-      .then((result: any) => {
-        if (!result || !result.data || result.data.length === 0) {
-          update_func(item, { citationNumber: "Not Found" });
-          return;
-        }
-
-        let hit_index = -1;
-        let min_dis = 100000;
-        for (let i = 0; i < result.data.length; i++) {
-          const paper = result.data[i];
-          if (!paper.title) continue;
-          const ptitle = paper.title;
-          const dis = PaperInfo.minDistance(title, ptitle);
-          if (dis < min_dis) {
-            min_dis = dis;
-            hit_index = i;
-          }
-        }
-
-        if (hit_index !== -1 && min_dis < 15) {
-          const paper = result.data[hit_index];
-          const citationCount = typeof paper.citationCount === "number" ? paper.citationCount : 0;
-          update_func(item, { citationNumber: citationCount.toString() });
-        } else {
-          update_func(item, { citationNumber: "Not Found" });
-        }
-      })
-      .catch((error) => {
-        ztoolkit.log("Semantic Scholar citation query error: " + error);
-        update_func(item, { citationNumber: "Error" });
-      });
-  },
-
-  getPaperCCFRank(
-    item: any,
-    title: string,
-    update_func: (item: any, data: any) => void,
-  ): void {
-    const ccfInfoFromItem = getCCFInfoFromZoteroItem(item);
-    if (ccfInfoFromItem) {
-      update_func(item, { ccfInfo: ccfInfoFromItem });
-      return;
-    }
-
-    const cleanTitle = this.cleanString(title);
-    if (cleanTitle === "") {
-      update_func(item, { ccfInfo: "Not Found" });
-      return;
-    }
-
-    getPaperCCFRankFromSemanticScholar(title)
-      .then((result) => {
-        if (result) {
-          if (result === "Arxiv") {
-            update_func(item, { ccfInfo: ARXIV_INFO });
-          } else {
-            update_func(item, { ccfInfo: `CCF-${result.rank} ${result.abbr}` });
-          }
-        } else {
-          getPaperCCFRankFromDBLP(item, title, update_func);
-        }
-      })
-      .catch((err) => {
-        ztoolkit.log("S2 matching rejected, falling back to DBLP: " + err);
-        getPaperCCFRankFromDBLP(item, title, update_func);
-      });
-  },
-
-  batchGetPaperCCFRank(
-    items: any[],
-    titles: string[],
-    update_func: (items: any[], data: any) => void,
-  ): void {
-    const localResults = items.map((item) => getCCFInfoFromZoteroItem(item));
-    if (localResults.every((ccfInfo) => ccfInfo !== undefined)) {
-      update_func(
-        items,
-        localResults.map((ccfInfo) => ({ ccfInfo })),
-      );
-      return;
-    }
-
-    const promises = items.map(async (item, index) => {
-      if (localResults[index]) {
-        return { ccfInfo: localResults[index] };
+  async getPaperCitationNumber(item, title, update_func) {
+    let citationNumber = "Not Found";
+    try {
+      const paper = await findSemanticPaper(item, title);
+      const count = paper?.citationCount;
+      if (
+        typeof count === "number" &&
+        Number.isSafeInteger(count) &&
+        count >= 0
+      ) {
+        citationNumber = String(count);
       }
-      const title = titles[index];
+    } catch (error) {
+      ztoolkit.log("Citation lookup failed", error);
+      citationNumber = lookupError(error);
+    }
+    await update_func(item, { citationNumber });
+  },
+
+  async getPaperCCFRank(item, title, update_func) {
+    let ccfInfo = getCCFInfoFromZoteroItem(item);
+    if (!ccfInfo && normalizeTitle(title)) {
       try {
-        const s2Result = await getPaperCCFRankFromSemanticScholar(title);
-        if (s2Result) {
-          if (s2Result === "Arxiv") {
-            return { ccfInfo: ARXIV_INFO };
-          } else {
-            return { ccfInfo: `CCF-${s2Result.rank} ${s2Result.abbr}` };
-          }
-        }
-      } catch (e) {
-        ztoolkit.log("S2 batch item query error: " + e);
+        const result = await getPaperCCFRankFromSemanticScholar(item, title);
+        if (result)
+          ccfInfo = result === "Arxiv" ? ARXIV_INFO : formatCCFInfo(result);
+      } catch (error) {
+        ztoolkit.log("Semantic Scholar unavailable; trying DBLP", error);
       }
-      return undefined;
-    });
-
-    Promise.all(promises)
-      .then((s2Results) => {
-        const pendingItems: any[] = [];
-        const pendingTitles: string[] = [];
-        const pendingIndices: number[] = [];
-
-        s2Results.forEach((res, index) => {
-          if (!res) {
-            pendingItems.push(items[index]);
-            pendingTitles.push(titles[index]);
-            pendingIndices.push(index);
-          }
-        });
-
-        if (pendingItems.length === 0) {
-          update_func(items, s2Results);
-        } else {
-          batchGetPaperCCFRankFromDBLP(
-            pendingItems,
-            pendingTitles,
-            (pItems: any[], pResults: any[]) => {
-              const finalResults = [...s2Results];
-              pResults.forEach((pRes: any, pIndex: number) => {
-                const originalIndex = pendingIndices[pIndex];
-                finalResults[originalIndex] = pRes;
-              });
-              update_func(items, finalResults);
-            },
-          );
+      if (!ccfInfo) {
+        try {
+          ccfInfo = await getPaperCCFRankFromDBLP(title);
+        } catch (error) {
+          ztoolkit.log("DBLP lookup failed", error);
+          ccfInfo = lookupError(error);
         }
-      })
-      .catch((err) => {
-        ztoolkit.log(
-          "S2 batch matching rejected, falling back to DBLP: " + err,
-        );
-        batchGetPaperCCFRankFromDBLP(items, titles, update_func);
-      });
+      }
+    }
+    await update_func(item, { ccfInfo: ccfInfo || "Not Found" });
   },
 
-  updatePaperInfo(
-    item: any,
-    title: string,
-    callback: (item: any, data: any) => void,
-  ): void {
-    // this.getPaperCitationNumber(item, title, callback); TODO: fix this
-    this.getPaperCCFRank(item, title, callback);
+  async batchGetPaperCCFRank(items, titles, update_func) {
+    const results: { ccfInfo: string }[] = [];
+    for (let index = 0; index < items.length; index++) {
+      await this.getPaperCCFRank(
+        items[index],
+        titles[index] || "",
+        (_, data) => {
+          results.push(data);
+        },
+      );
+    }
+    await update_func(items, results);
+  },
+
+  async updatePaperInfo(item, title, callback) {
+    await this.getPaperCCFRank(item, title, callback);
   },
 };
-
-//test
-// function callback(item: any, data: any) {
-//   console.log(data);
-// }
-// PaperInfo.updatePaperInfo({}, "Large Language Models for Recommendation: Progresses and Future Directions", callback);

@@ -1,61 +1,108 @@
-# Zotero CCF Plus 🚀
+# Zotero CCF Plus
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Zotero-Plugin-CC2936?style=for-the-badge&logo=zotero&logoColor=white" alt="Zotero Plugin">
-  <img src="https://img.shields.io/badge/License-AGPL--3.0-orange?style=for-the-badge" alt="License AGPL-3.0">
-  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge" alt="PRs Welcome">
-</p>
+[![CI](https://github.com/Fangziyang0910/zotero-ccf-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/Fangziyang0910/zotero-ccf-plus/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Fangziyang0910/zotero-ccf-plus)](https://github.com/Fangziyang0910/zotero-ccf-plus/releases/latest)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
 
-**Zotero CCF Plus** 是一款极简、高效的 Zotero 学术评级与文献引用量瞬时获取插件。它能够帮助您一键自动标注 **最新 2026 年第七版 CCF（中国计算机学会）推荐期刊与会议分级**，完善文献的出版物全称，并获取文献的最新引用次数，让您的学术文献管理与筛选变得无比轻松。
+为 Zotero 文献显示 CCF 期刊/会议评级和 Semantic Scholar 引用次数。结果保存在文献的子笔记中，可通过列表列查看。
 
-**Zotero CCF Plus** is a lightweight and highly efficient Zotero plugin that instantly fetches **the latest 2026 (7th Edition) CCF academic rankings**, journal/conference full names, and paper citation counts, making literature screening and organization effortless.
+A Zotero plugin for CCF venue rankings and Semantic Scholar citation counts. Results are stored in a child note and displayed in optional library columns. See [English quick start](#english-quick-start).
 
----
+## 兼容性
 
-## ✨ 它能为您做什么？(What Can It Do?)
+- 声明支持 **Zotero 7–10.0**，包括稳定版 Zotero 10 的兼容性检查。
+- 本次实际验收环境：**macOS、Zotero 10.0.6**。其他系统和旧版本尚未在本次维护中进行实机验收，欢迎提供测试反馈。
+- 当前维护版本：**0.3.4**。变更记录见 [CHANGELOG](CHANGELOG.md)。
 
-* ⚡ **自动标注最新 CCF 学术评级**：一键为文献匹配并标注 **CCF-A / B / C** 分级，**100% 完整支持最新的 2026 年第七版 CCF 推荐期刊与会议目录**（包括 arXiv 预印本、期刊与会议）。
-* 🎨 **彩色标签直观呈现**：主列表中支持以 **绿色 (CCF A)**、**蓝色 (CCF B)**、**黄色 (CCF C)**、**紫色 (CCF None)** 和 **灰色 (Preprint)** 等精美的彩色标签直观分类呈现。
-* 📖 **完善出版物会刊全称**：自动补全或校对文献对应的期刊/会议缩写与英文完整名称。
-* 📈 **获取实时文献引用量**：智能查询文献在学术网络中的最新引用次数（Citations），并在主列表专用列直观显示，方便评估文献学术影响力。
-* 📝 **结构化笔记归档**：匹配到的学术信息将自动同步创建一个结构化的富文本 `Note`（文献笔记）子条目进行本地永久归档。
+## 安装与使用
 
----
+1. 从 [Releases](https://github.com/Fangziyang0910/zotero-ccf-plus/releases/latest) 下载 `zotero-ccf-plus.xpi`，请勿下载源码压缩包代替插件。
+2. 打开 Zotero 的 **工具 → 插件**，点击齿轮，选择 **Install Plugin From File… / 从文件安装插件**；不同 Zotero 版本的名称可能略有区别。
+3. 选择 XPI 文件，确认插件已启用。升级后若界面尚未刷新，可重启 Zotero。
+4. 选中一篇或多篇普通文献条目，右键选择 **获取 CCF 信息**。
+5. 右键点击列表表头，勾选 **CCF 信息** 和 **CCF Plus 引用次数**。后者与 Zotero 自带或其他插件的“引用次数”列不同。
 
-## 📸 界面展示 (Screenshots & Demo)
+附件、笔记、回收站条目和只读文库不会执行更新。重复点击同一文献时会合并正在进行的查询；批量查询按顺序处理。新增个人文库条目默认会在约 10 秒的导入等待后自动查询。
 
-<p align="center">
-  <img src="./doc/ccf-list-view.png" alt="Zotero CCF Plus List View" width="95%" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
-  <br>
-  <i>文献主列表多维度 CCF 评级与 arXiv 预印本彩色标签直观呈现效果 (Direct rendering of CCF grades & arXiv preprint color labels in the main list)</i>
-</p>
+![CCF 列示例](doc/ccf-list-view.png)
 
-<br>
+_旧版界面截图；当前引用次数列的名称为“CCF Plus 引用次数”。_
 
-<p align="center">
-  <img src="./doc/ccf-right-click.png" alt="Zotero CCF Plus Right-Click Menu" width="60%" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
-  <br>
-  <i>鼠标右键一键获取文献学术评级、出版物会刊全称与实时引用量演示 (One-click right-click to fetch CCF rankings and citations)</i>
-</p>
+![右键菜单示例](doc/ccf-right-click.png)
 
----
+### 结果如何保存
 
-## 📥 安装指南 (Installation)
+插件创建或更新标题为 **CCF Info & Citations** 的子笔记，包含可读表格和供列表列读取的 JSON 数据。正常更新只维护这一篇插件笔记，不修改 PDF、正文笔记或文献的出版物元数据。
 
-1. 前往本仓库的 [Releases](https://github.com/Fangziyang0910/zotero-ccf-plus/releases) 页面，下载最新的 `.xpi` 格式插件包（例如 `zotero-ccf-plus.xpi` 或 `ccfplus@timetrapzz.site.xpi`）。
-2. 打开 Zotero，在菜单栏点击 `Tools` (工具) -> `Add-ons` (附加组件)。
-3. 点击右上角的齿轮图标，选择 `Install Add-on From File...` (从文件安装附加组件...)。
-4. 选择下载的 `.xpi` 文件安装，重启 Zotero 即可。
+| 显示               | 含义                                                     |
+| ------------------ | -------------------------------------------------------- |
+| `CCF A / B / C`    | 文献的出版会刊匹配到了内置目录中的评级                   |
+| `CCF None`         | 检测到了会刊，但未匹配到内置评级；不代表对论文质量的判断 |
+| `Preprint / arXiv` | 本地或检索结果指向 arXiv；不代表已核实其后续正式发表情况 |
+| `Not Found`        | 当前元数据或检索结果不足以完成匹配                       |
+| `Error: 429` 等    | 数据源暂不可用；已有的成功结果会保留                     |
 
----
+### 数据来源与匹配规则
 
-## 🤝 致谢与声明 (Credits & Acknowledgement)
+- **CCF 评级**：优先匹配 Zotero 中已有的会议名、出版物名、缩写、网址或 Extra 中的会刊字段；缺少可用元数据时，再尝试 Semantic Scholar 和 DBLP。
+- **目录快照**：[`src/modules/ccfCatalog2026.ts`](src/modules/ccfCatalog2026.ts) 保存了从 `ccf.atom.im` 镜像整理的 2026 目录快照，并保留历史别名兼容。目录随插件发布，不会自动同步，也不保证完整或完全准确；正式使用请核对 [CCF 官方推荐目录](https://www.ccf.org.cn/Academic_Evaluation/By_category/)。
+- **引用次数**：来自 [Semantic Scholar Academic Graph](https://www.semanticscholar.org/product/api)。优先尝试 DOI/arXiv 标识符，并校验规范化后的标题；标题搜索也要求规范化后相同，以减少短标题误匹配。
+- 同一篇文献的成功匹配结果在内存中缓存 **5 分钟**，评级和引用查询共享这份结果。真实的 0 次引用会显示为 0；缺失值不会被当成 0。
 
-* 感谢项目 [windingwind/zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template) 提供的插件模板骨架。
-* 感谢原作者 [TimeTrapzz](https://github.com/TimeTrapzz) 与 [tojunfeng](https://github.com/tojunfeng) 奠定的插件核心开发与本地匹配算法基础。
+## 故障排查与已知限制
 
----
+### 引用次数没有更新 / HTTP 429
 
-## 📄 许可证 (License)
+Semantic Scholar 公共接口可能限流，且可能存在共享出口的额度限制。插件会串行发送请求、限制请求间隔，并在 429 后至少暂停该服务 30 秒；这不能保证外部服务一定可用。请稍后重试。
 
-本项目采用 **AGPL-3.0-or-later** 许可证开源，请在遵守开源协议的前提下进行分发和二次开发。
+CCF 本地匹配可以在离线时工作；没有本地元数据的查询还依赖网络。DBLP 通过第三方代理 `dblp.timetrap.workers.dev` 访问，代理也可能不可用。每次网络请求（含响应读取）的超时为 15 秒。错误、空结果或未找到的数据不会覆盖之前成功的评级或引用量；完成提示会说明有多少条目的信息未完整取得。
+
+### 评级不正确
+
+先检查条目的会议名称、出版物名称、期刊缩写和 Extra 中的会刊信息，再重新查询。不要把 arXiv 链接本身当成正式发表证据。若内置目录或别名有误，请提交包含会刊全称和官方目录来源的 issue/PR。插件目前不提供独立的手动评级编辑器。
+
+### 列不显示或窗口重开后菜单消失
+
+确认插件已启用，再在表头菜单中开启相应列。0.3.4 修复了重复窗口注册及卸载清理；仍有问题时请提供 Zotero 版本、系统版本、插件版本和复现步骤。
+
+### 关闭自动查询
+
+在 Zotero **设置 → 高级 → 配置编辑器**中，将 `extensions.zotero.ccfplus.enable` 设为 `false`。该选项控制新增条目的自动查询，右键手动查询仍可使用。
+
+## 隐私与网络访问
+
+在线查询会将论文标题，以及可用的 DOI/arXiv 标识符发送到 Semantic Scholar；DBLP 回退查询会将规范化后的标题发送到上述第三方代理。插件不上传附件、PDF 内容或笔记正文。不希望新增条目自动查询时，请关闭自动查询。查询结果保存在本地 Zotero 文库，之后是否同步由 Zotero 自身的同步设置决定。
+
+## 开发与贡献
+
+需要 Node.js 22 或更新版本。依赖由 `package-lock.json` 锁定：
+
+```sh
+npm ci
+npm run check
+npm run build
+```
+
+生成的 XPI 和更新清单位于 `build/`。`npm test` 运行不依赖外部服务的回归测试；这些测试验证请求处理、数据匹配、笔记合并和生命周期逻辑，不代替实机测试。完整贡献流程和验收步骤见 [CONTRIBUTING](CONTRIBUTING.md)。
+
+每个推送和 PR 都运行 CI；发布 `v<package.json 版本号>` 标签时，会再次检查、构建插件、发布 XPI，并更新 Zotero 自动更新清单。
+
+报告问题请使用 [Issues](https://github.com/Fangziyang0910/zotero-ccf-plus/issues)，请去除 API 密钥、私人文献内容等敏感信息。请勿将整个 Zotero 文库上传到 issue。
+
+## English quick start
+
+1. Download `zotero-ccf-plus.xpi` from [Releases](https://github.com/Fangziyang0910/zotero-ccf-plus/releases/latest).
+2. In Zotero, open **Tools → Plugins**, use the gear menu to install the XPI, and confirm that it is enabled.
+3. Select regular items and choose **Get CCF Info** from the context menu. Enable **CCF Info** and **CCF Plus Citations** in the column header menu.
+
+The declared compatibility range is Zotero 7–10.0. This maintenance pass is tested on macOS with Zotero 10.0.6; other platforms need independent testing. Rankings use bundled venue data, local metadata, Semantic Scholar, and a third-party DBLP proxy. Citation counts come from Semantic Scholar, which may rate-limit requests. Matching is conservative; missing data is not zero, and unsuccessful refreshes preserve previous successful values. A progress message reports incomplete lookups. Successful remote matches are cached in memory for five minutes.
+
+Online lookups send titles and available DOI/arXiv identifiers to the services described above. PDF contents and notes are not uploaded by the plugin. Automatic lookups for newly imported personal-library items are enabled by default; set `extensions.zotero.ccfplus.enable` to `false` in Zotero's Config Editor to disable them. Manual refresh remains available.
+
+For development, run `npm ci`, `npm run check`, and `npm run build`. See [CONTRIBUTING](CONTRIBUTING.md) for regression tests and manual acceptance checks.
+
+## 致谢与许可证
+
+感谢 [windingwind/zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template)、[TimeTrapzz](https://github.com/TimeTrapzz)、[tojunfeng](https://github.com/tojunfeng)，以及提交问题和兼容性反馈的贡献者。
+
+本项目使用 [AGPL-3.0-or-later](LICENSE) 许可证。CCF、Semantic Scholar、DBLP 及镜像数据的相关权利归各自权利人所有。

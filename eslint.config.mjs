@@ -8,6 +8,15 @@ export default tseslint.config(
     ignores: ["build/**", "dist/**", "node_modules/**", "scripts/"],
   },
   {
+    files: ["tests/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly", setTimeout: "readonly", clearTimeout: "readonly",
+        setImmediate: "readonly", AbortController: "readonly", URL: "readonly",
+      },
+    },
+  },
+  {
     extends: [eslint.configs.recommended, ...tseslint.configs.recommended],
     rules: {
       "@typescript-eslint/ban-ts-comment": [

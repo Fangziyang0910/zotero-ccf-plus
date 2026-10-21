@@ -1,5 +1,5 @@
 import { config } from "../../package.json";
-import { getLocaleID, getString } from "../utils/locale";
+import { getString } from "../utils/locale";
 import { PaperInfo } from "./getPaperInfo";
 
 // Note标题常量
@@ -12,6 +12,30 @@ interface CCFInfoData {
 }
 
 export class ExampleFactory {
+  private static noteWrites = new Map<number, Promise<void>>();
+  private static pendingItems = new Map<number, Promise<boolean>>();
+  private static notifierID: string | undefined;
+  private static notifierTimer: ReturnType<typeof setTimeout> | undefined;
+  private static addedItems = new Set<number>();
+  private static columnKeys: string[] = [];
+
+  private static canUpdateItem(item: Zotero.Item): boolean {
+    const library = item && Zotero.Libraries.get(item.libraryID);
+    return Boolean(
+      item?.isRegularItem() && !item.deleted && library && library.editable,
+    );
+  }
+
+  private static preserveSuccessfulValue(
+    value: string | undefined,
+    existing: string,
+    valid: (text: string) => boolean,
+  ): string {
+    if (value && valid(value)) return value;
+    if (valid(existing)) return existing;
+    return value || existing;
+  }
+
   private static escapeHtml(value: string): string {
     return value
       .replace(/&/g, "&amp;")
@@ -207,6 +231,24 @@ export class ExampleFactory {
     ccfInfo?: string,
     citationNumber?: string,
   ) {
+    const previous = this.noteWrites.get(item.id) || Promise.resolve();
+    const write = previous
+      .catch(() => undefined)
+      .then(() => this.writeCCFInfoToNote(item, ccfInfo, citationNumber));
+    this.noteWrites.set(item.id, write);
+    try {
+      await write;
+    } finally {
+      if (this.noteWrites.get(item.id) === write)
+        this.noteWrites.delete(item.id);
+    }
+  }
+
+  private static async writeCCFInfoToNote(
+    item: Zotero.Item,
+    ccfInfo?: string,
+    citationNumber?: string,
+  ) {
     try {
       // getNotes()返回的是note ID数组
       const noteIDs = item.getNotes();
@@ -238,14 +280,16 @@ export class ExampleFactory {
       const existingData = ExampleFactory.getCCFInfoFromNote(item);
 
       // 只更新提供的字段，保留现有值
-      const finalCcfInfo =
-        ccfInfo !== undefined && ccfInfo !== ""
-          ? ccfInfo
-          : existingData.ccfInfo;
-      const finalCitationNumber =
-        citationNumber !== undefined && citationNumber !== ""
-          ? citationNumber
-          : existingData.citationNumber;
+      const finalCcfInfo = this.preserveSuccessfulValue(
+        ccfInfo,
+        existingData.ccfInfo,
+        (value) => value === "arXiv" || /^CCF-(?:[ABC]|None)\s+\S/.test(value),
+      );
+      const finalCitationNumber = this.preserveSuccessfulValue(
+        citationNumber,
+        existingData.citationNumber,
+        (value) => /^\d+$/.test(value),
+      );
 
       // 构建JSON数据
       const jsonData: CCFInfoData = {
@@ -260,13 +304,11 @@ export class ExampleFactory {
       ccfNote.setNote(noteContent);
       await ccfNote.saveTx();
 
-      // 等待一小段时间确保保存完成
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
       // 刷新列显示
       ExampleFactory.refreshItemTreeRow(item);
     } catch (error) {
       ztoolkit.log("Error saving CCF info to note:", error);
+      throw error;
     }
   }
 
@@ -298,7 +340,7 @@ export class ExampleFactory {
   }
 
   static async registerExtraColumn() {
-    await Zotero.ItemTreeManager.registerColumns([
+    const keys = await Zotero.ItemTreeManager.registerColumns([
       {
         pluginID: config.addonID,
         dataKey: "ccfInfo",
@@ -363,144 +405,168 @@ export class ExampleFactory {
         zoteroPersist: ["width", "hidden", "sortDirection"],
       },
     ]);
+    this.columnKeys = keys || [];
   }
 
   public static async handleGetCCFInfo(items: Zotero.Item[]) {
-    if (!items || items.length === 0) return;
-    ztoolkit.log("handleGetCCFInfo", items);
-    if (items.length === 1) {
-      await ExampleFactory.handleSingleItem(items[0]);
-    } else {
-      await ExampleFactory.handleMultipleItems(items);
-    }
-  }
-
-  private static async handleSingleItem(entry: Zotero.Item) {
-    const progressWindow = new ztoolkit.ProgressWindow(
+    const regularItems = [
+      ...new Map(
+        items
+          .filter((item) => this.canUpdateItem(item))
+          .map((item) => [item.id, item]),
+      ).values(),
+    ];
+    if (!regularItems.length || !addon.data.alive) return;
+    const progress = new ztoolkit.ProgressWindow(
       getString("paper-info-update"),
-      {
-        closeOtherProgressWindows: true,
-      },
     );
-    progressWindow.createLine({
-      text: getString("requesting-citation-single"),
-      type: "default",
-    });
-    progressWindow.show();
-    progressWindow.startCloseTimer(2000);
-
-    // Get new CCF rank and citation number
-    PaperInfo.getPaperCCFRank(
-      entry,
-      entry.getField("title"),
-      async (item, data) => {
-        await ExampleFactory.saveCCFInfoToNote(item, data.ccfInfo);
-        ExampleFactory.updateCitationNumber(entry, 1);
-      },
-    );
-  }
-
-  private static async handleMultipleItems(items: Zotero.Item[]) {
-    const progressWindow = new ztoolkit.ProgressWindow(
-      getString("paper-info-update"),
-      {
-        closeOtherProgressWindows: true,
-      },
-    );
-    progressWindow.createLine({
+    progress.createLine({
       text: getString("requesting-citations-multiple", {
-        args: { count: items.length },
+        args: { count: regularItems.length },
       }),
       type: "default",
+      progress: 0,
     });
-    progressWindow.show();
-    progressWindow.startCloseTimer(2000);
-
-    const titles = items.map((item) => item.getField("title"));
-    PaperInfo.batchGetPaperCCFRank(items, titles, async (items, data) => {
-      if (data.length === items.length) {
-        for (let index = 0; index < items.length; index++) {
-          const entry = items[index];
-          await ExampleFactory.saveCCFInfoToNote(entry, data[index].ccfInfo);
-          ExampleFactory.updateCitationNumber(entry, index, items.length);
+    progress.show();
+    let unavailable = 0;
+    for (let index = 0; index < regularItems.length; index++) {
+      if (!addon.data.alive) break;
+      const item = regularItems[index];
+      try {
+        let pending = this.pendingItems.get(item.id);
+        if (!pending) {
+          pending = this.updateItem(item);
+          this.pendingItems.set(item.id, pending);
         }
-      } else {
-        for (let index = 0; index < items.length; index++) {
-          const entry = items[index];
-          await ExampleFactory.saveCCFInfoToNote(entry, data.ccfInfo);
-          ExampleFactory.updateCitationNumber(entry, items.length, index);
+        try {
+          if (await pending) unavailable++;
+        } finally {
+          if (this.pendingItems.get(item.id) === pending)
+            this.pendingItems.delete(item.id);
         }
+      } catch (error) {
+        unavailable++;
+        ztoolkit.log("Item update failed", error);
       }
+      progress.changeLine({
+        idx: 0,
+        progress: ((index + 1) / regularItems.length) * 100,
+        text: `${index + 1} / ${regularItems.length}`,
+      });
+    }
+    progress.changeLine({
+      idx: 0,
+      progress: 100,
+      text: getString(unavailable ? "update-partial" : "update-complete", {
+        args: { count: unavailable || regularItems.length },
+      }),
     });
+    progress.startCloseTimer(unavailable ? 8000 : 3000);
   }
 
-  private static async updateCitationNumber(
-    entry: Zotero.Item,
-    index?: number,
-    total?: number,
-  ) {
-    PaperInfo.getPaperCitationNumber(
-      entry,
-      entry.getField("title"),
-      async (item, data) => {
-        await ExampleFactory.saveCCFInfoToNote(
-          item,
-          undefined,
-          data.citationNumber,
-        );
-      },
+  private static async updateItem(item: Zotero.Item): Promise<boolean> {
+    let ccfInfo = "";
+    let citationNumber = "";
+    const title = item.getField("title");
+    await PaperInfo.getPaperCCFRank(item, title, (_, data) => {
+      ccfInfo = data.ccfInfo;
+    });
+    await PaperInfo.getPaperCitationNumber(item, title, (_, data) => {
+      citationNumber = data.citationNumber;
+    });
+    if (!addon.data.alive || item.deleted) return true;
+    await this.saveCCFInfoToNote(item, ccfInfo, citationNumber);
+    return (
+      /^(?:Error|Net Error|Not Found)/.test(ccfInfo) ||
+      !/^\d+$/.test(citationNumber)
     );
   }
 
-  static registerRightClickMenuItem() {
-    const menuIcon = `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`;
-    ztoolkit.Menu.register("item", {
+  static registerRightClickMenuItem(
+    win: Window,
+    toolkit: ZToolkit,
+  ): () => void {
+    const popup = win.document.getElementById(
+      "zotero-itemmenu",
+    ) as XUL.MenuPopup | null;
+    if (!popup) return () => {};
+    const id = "zotero-itemmenu-get-ccf-info";
+    win.document.getElementById(id)?.remove();
+    const pane = () =>
+      (win as Window & { ZoteroPane: typeof ZoteroPane }).ZoteroPane;
+    toolkit.Menu.register(popup, {
       tag: "menuitem",
-      id: "zotero-itemmenu-get-ccf-info",
+      id,
       label: getString("get-ccf-info"),
-      commandListener: (ev) => {
-        const items = ZoteroPane.getSelectedItems();
-        ExampleFactory.handleGetCCFInfo(items);
+      commandListener: () => {
+        void this.handleGetCCFInfo(pane().getSelectedItems()).catch((error) =>
+          ztoolkit.log("CCF update failed", error),
+        );
       },
-      icon: menuIcon,
+      icon: `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`,
     });
+    const onShowing = () => {
+      const selected = pane().getSelectedItems();
+      win.document
+        .getElementById(id)
+        ?.setAttribute(
+          "hidden",
+          String(
+            !selected.some((item: Zotero.Item) => this.canUpdateItem(item)),
+          ),
+        );
+    };
+    popup.addEventListener("popupshowing", onShowing);
+    return () => {
+      popup.removeEventListener("popupshowing", onShowing);
+      win.document.getElementById(id)?.remove();
+    };
   }
 
   static registerNotifier() {
-    const callback = {
-      notify: async (
-        event: string,
-        type: string,
-        ids: Array<string | number>,
-        extraData: { [key: string]: any },
-      ) => {
-        if (!addon?.data.alive) {
-          this.unregisterNotifier(notifierID);
-          return;
-        }
-        addon.hooks.onNotify(event, type, ids, extraData);
+    if (this.notifierID) return;
+    this.notifierID = Zotero.Notifier.registerObserver(
+      {
+        notify: (event, type, ids) => {
+          if (addon.data.alive)
+            void addon.hooks
+              .onNotify(event, type, ids, {})
+              .catch((error) => ztoolkit.log("CCF observer failed", error));
+        },
       },
-    };
-
-    const notifierID = Zotero.Notifier.registerObserver(callback, ["item"]);
-
-    // Unregister callback when the window closes (important to avoid a memory leak)
-    window.addEventListener(
-      "unload",
-      (e: Event) => {
-        this.unregisterNotifier(notifierID);
-      },
-      false,
+      ["item"],
     );
   }
 
-  static async exampleNotifierCallback(regularItems: any) {
-    // 等待 10s 以防止 Zotero 未完成条目添加
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-    await ExampleFactory.handleGetCCFInfo(regularItems);
+  static async exampleNotifierCallback(items: Zotero.Item[]) {
+    for (const item of items) this.addedItems.add(item.id);
+    if (this.notifierTimer) clearTimeout(this.notifierTimer);
+    this.notifierTimer = setTimeout(() => {
+      this.notifierTimer = undefined;
+      const ids = [...this.addedItems];
+      this.addedItems.clear();
+      if (!addon.data.alive) return;
+      const entries = Zotero.Items.get(ids).filter(
+        (item) => item && !item.deleted,
+      );
+      void this.handleGetCCFInfo(entries).catch((error) =>
+        ztoolkit.log("Automatic CCF update failed", error),
+      );
+    }, 10000);
   }
 
-  private static unregisterNotifier(notifierID: string) {
-    Zotero.Notifier.unregisterObserver(notifierID);
+  static unregisterApplicationResources() {
+    if (this.notifierID) Zotero.Notifier.unregisterObserver(this.notifierID);
+    this.notifierID = undefined;
+    if (this.notifierTimer) clearTimeout(this.notifierTimer);
+    this.notifierTimer = undefined;
+    this.addedItems.clear();
+    if (typeof Zotero.ItemTreeManager.unregisterColumn === "function") {
+      for (const key of this.columnKeys)
+        Zotero.ItemTreeManager.unregisterColumn(key);
+    } else if (this.columnKeys.length) {
+      void Zotero.ItemTreeManager.unregisterColumns(this.columnKeys);
+    }
+    this.columnKeys = [];
   }
 }
