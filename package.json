@@ -32,7 +32,7 @@
     "check": "npm test && npm run lint && npm run format:check"
   },
   "dependencies": {
-    "zotero-plugin-toolkit": "5.1.0-beta.13"
+    "zotero-plugin-toolkit": "5.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
