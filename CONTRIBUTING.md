@@ -14,7 +14,7 @@ npm run build
 
 `npm run check` runs deterministic regression tests, ESLint, and formatting checks. `npm run format` formats the maintained files. Commit `package-lock.json` when dependencies change; do not edit generated `build/` files.
 
-Tests bundle the actual TypeScript modules with esbuild and provide a small Zotero host fixture. They cover callbacks, conservative matching, failed responses, rate limits, timeout/cancellation, concurrent note writes, and window lifecycle registration. Do not replace these tests with assertions that merely copy implementation details. External API availability is checked manually, so CI does not require API keys or live network queries.
+Tests bundle the actual TypeScript modules with esbuild and provide a small Zotero host fixture. They cover callbacks, conservative matching, failed responses, rate limits, timeout/cancellation, concurrent note writes, and window lifecycle registration. Do not replace these tests with assertions that merely copy implementation details. External API availability is checked manually, so local regression tests do not require API keys or live network queries.
 
 ## Manual acceptance
 
@@ -40,7 +40,7 @@ The bundled `src/modules/ccfCatalog2026.ts` is a snapshot from a third-party mir
 1. Update `package.json`, `package-lock.json`, `CHANGELOG.md`, and relevant README instructions.
 2. Run the checks, build, and manual acceptance steps. Check the XPI's manifest, compatibility range, and generated update-feed hash.
 3. Commit the tested changes and create a tag matching the package version (for example `v0.3.4`).
-4. Push the commit and tag. The Release workflow builds and publishes the XPI and uploads update manifests to the `release` feed.
-5. Confirm that GitHub Actions succeeded and that the published update manifest points to the release's package with the correct hash.
+4. Push the commit and tag. Manually publish the built XPI as a GitHub Release and upload the update manifests to the `release` feed. GitHub Actions is disabled.
+5. Confirm that the published update manifest points to the release's package with the correct hash.
 
 Keep release and update-feed assets from the same build. Never silently replace a versioned XPI with different bytes after users have downloaded it.

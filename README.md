@@ -1,6 +1,5 @@
 # Zotero CCF Plus
 
-[![CI](https://github.com/Fangziyang0910/zotero-ccf-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/Fangziyang0910/zotero-ccf-plus/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Fangziyang0910/zotero-ccf-plus)](https://github.com/Fangziyang0910/zotero-ccf-plus/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE)
 
@@ -85,7 +84,7 @@ npm run build
 
 生成的 XPI 和更新清单位于 `build/`。`npm test` 运行不依赖外部服务的回归测试；这些测试验证请求处理、数据匹配、笔记合并和生命周期逻辑，不代替实机测试。完整贡献流程和验收步骤见 [CONTRIBUTING](CONTRIBUTING.md)。
 
-每个推送和 PR 都运行 CI；发布 `v<package.json 版本号>` 标签时，会再次检查、构建插件、发布 XPI，并更新 Zotero 自动更新清单。
+测试、检查和构建在本机执行。发布标签不会触发 GitHub 自动化；手动上传同次构建的 XPI 和 Zotero 更新清单。
 
 报告问题请使用 [Issues](https://github.com/Fangziyang0910/zotero-ccf-plus/issues)，请去除 API 密钥、私人文献内容等敏感信息。请勿将整个 Zotero 文库上传到 issue。
 
